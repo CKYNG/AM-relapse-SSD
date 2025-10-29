@@ -1,0 +1,207 @@
+---
+title: "F1"
+author: "CY"
+date: "2025-10-29"
+output: html_document
+---
+#set working directory to pull and push files to/from
+```{r setup}
+#change this to the location of your data 
+knitr::opts_knit$set(root.dir ="/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F1")
+setwd("/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F1")
+```
+#load in packages for analysis 
+```{r}
+library(ggplot2) #4.0.0
+library(permute) #0.9.8
+library(lattice) #0.22.7
+library(vegan) #2.7.2
+library(dplyr) #1.1.4
+library(labdsv) #2.1.2
+library(tidyverse) #2.0.0
+library(ggpubr) #0.6.2
+library(rstatix) #0.7.3
+library(FSA) #0.10.0
+library(viridis) #0.6.5
+library(plyr) #1.8.9
+library(Maaslin2) #3.21
+```
+#load in datatables 
+```{r}
+#MetaPhlAn4 species output in the wide format
+wide_species <- read.csv("./wide_species.csv") #used for Fig 1B, C, and E
+#MetaPhlAn4 phyla output in the wide format 
+long_phyla <- read.csv("./long_phyla.csv") #used for Fig 1D
+#metadata file 
+metadata <- read.csv("./metadata.csv") #used for Fig 1B, C, D, and E 
+```
+#format data 
+```{r}
+#convert NAs in wide species table to 0s 
+wide_species[is.na(wide_species)] <- 0
+#convert empty spaces in metadata file to NAs 
+metadata[metadata == ""] <- NA
+```
+#generate shannon diversity for species 
+```{r}
+row.names(wide_species) <- wide_species$Sample
+wide_species <- wide_species[,-1]
+shannDiv<-as.data.frame(diversity(wide_species, index="shannon"))
+shannDivrich<-data.frame(
+  Sample=row.names(shannDiv),
+  shannon=diversity(wide_species),
+  richness=specnumber(wide_species)
+)
+```
+#join metadata with table containing species richness and shannon diversity 
+```{r}
+metadata_wide_species <- full_join(metadata, shannDivrich, by = "Sample")
+```
+#aggregate data from long phyla tables to generate average phyla abundances for children who sustained relpase vs relapsed to AM 
+```{r}
+#join long phyla table with metadata 
+metadata_long_phyla <- full_join(metadata,long_phyla, by ="Sample")
+# remove children not used for 1 month follow-up analysis 
+metadata_long_phyla <- metadata_long_phyla |>
+  filter(fullrecovery0=="1")
+#create sub data frames of children who sustained recovery vs relapsed to AM 
+metadata_long_phyla_sustained <- metadata_long_phyla[which(metadata_long_phyla$relapse1am_whz_and_muac == "0"),] 
+metadata_long_phyla_AM <- metadata_long_phyla[which(metadata_long_phyla$relapse1am_whz_and_muac == "1"),]
+#aggregate phyla abundances for individual outcomes 
+#sustained
+metadata_long_phyla_sustainedave<- aggregate(Abundance~Sample + Phyla + relapse1am_whz_and_muac, data= metadata_long_phyla_sustained, FUN=sum)
+metadata_long_phyla_sustainedave<- aggregate(Abundance~Phyla + relapse1am_whz_and_muac, data= metadata_long_phyla_sustained, FUN=mean)
+metadata_long_phyla_sustainedave<- metadata_long_phyla_sustainedave[which(metadata_long_phyla_sustainedave$Abundance > 0),]
+metadata_long_phyla_sustainedave$uniqSample<-paste(metadata_long_phyla_sustainedave$relapse1am_whz_and_muac)
+metadata_long_phyla_sustainedave$normalabundance<-metadata_long_phyla_sustainedave$Abundance/sum(metadata_long_phyla_sustainedave$Abundance)*100
+#relpase to AM 
+metadata_long_phyla_AMave<- aggregate(Abundance~Sample + Phyla + relapse1am_whz_and_muac, data= metadata_long_phyla_AM, FUN=sum)
+metadata_long_phyla_AMave<- aggregate(Abundance~Phyla + relapse1am_whz_and_muac, data= metadata_long_phyla_AM, FUN=mean)
+metadata_long_phyla_AMave<- metadata_long_phyla_AMave[which(metadata_long_phyla_AMave$Abundance > 0),]
+metadata_long_phyla_AMave$uniqSample<-paste(metadata_long_phyla_AMave$relapse1am_whz_and_muac)
+metadata_long_phyla_AMave$normalabundance<-metadata_long_phyla_AMave$Abundance/sum(metadata_long_phyla_AMave$Abundance)*100
+#rbind dataframes back together 
+metadata_long_phyla_1mo_phyla_ave<-rbind(metadata_long_phyla_sustainedave,metadata_long_phyla_AMave)
+#create a bin for all phyla abundances less than 1% 
+metadata_long_phyla_1mo_phyla_ave$Phyla[metadata_long_phyla_1mo_phyla_ave$Abundance<1] <- "phyla abund <1%"
+```
+#calculate Bray Curtis dissimilarity for species
+```{r}
+Bray <-vegdist(wide_species, method = "bray")
+pco.brayDF<-pco(Bray, k =4 )
+BrayDF<-as.data.frame(pco.brayDF$points)
+BrayDF$Sample<-row.names(BrayDF)
+BrayDFmeta<-join(BrayDF, metadata, by = "Sample")
+### Eigenvalues for all data##
+EigenBray<- rbind(SD = sqrt(pco.brayDF$eig),Proportion = pco.brayDF$eig/sum(pco.brayDF$eig),Cumulative = cumsum(pco.brayDF$eig)/sum(pco.brayDF$eig))
+BrayDF$Sample=NULL
+BrayDFmeta$relapse1am_whz_and_muac <- factor(BrayDFmeta$relapse1am_whz_and_muac, levels = c(0, 1), labels = c("sustained recovery", "AM"))
+```
+#Fig 1B species richness based on nutritional status at 1 month follow up
+```{r}
+#plot generation 
+ggplot(metadata_wide_species, aes(x=as.factor(relapse1am_whz_and_muac), y=richness)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Species Richness Based on \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Number of Species") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=12)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("susatined recovery", "AM"))
+#stats
+aggregate(richness ~ relapse1am_whz_and_muac, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$richness, metadata_wide_species$relapse1am_whz_and_muac, p.adjust.method = "BH") 
+#illustrator was used to add the ns label and adjust font/style of title 
+```
+#Fig 1C Shannon diversity based on nutriotional status at 1 month follow up 
+```{r}
+#plot generation
+ggplot(metadata_wide_species, aes(x=as.factor(relapse1am_whz_and_muac), y=shannon)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Shannon Diversity Based on \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Shannon Diversity") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=12)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "AM"))
+#stats
+aggregate(shannon ~ relapse1am_whz_and_muac, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$shannon, metadata_wide_species$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#illustrator was used to add the ns label and adjust font/style of title
+```
+#Fig 1D Phyla abundances by relapse status at 1 month follow up 
+```{r}
+ggplot(metadata_long_phyla_1mo_phyla_ave, aes(uniqSample, normalabundance, fill=Phyla)) + 
+  geom_bar(stat = "identity", position="stack") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Differences in Phyla Abundances Based on Nutritional Status at 1 Month Follow-up ") +
+  xlab("Malnutrition Status at 1 Month Follow-up") +
+  ylab("Normalized Abundance") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.text.x = element_text(size=20), axis.title.x=element_text(size=20), axis.title.y = element_text(size=20), axis.text.y = element_text(size=16), axis.title = element_text(size=24),legend.text = element_text(size = 10),legend.title = element_text(size = 12),plot.title = element_text(size=12)) + theme_linedraw() +
+   scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM")) + 
+  scale_fill_viridis(discrete = TRUE)
+#labels edited in illustrator 
+```
+#Fig 1E
+```{r}
+BrayDFmeta |>
+  filter(relapse1am_whz_and_muac == c("sustained recovery", "AM")) |>
+  ggplot(aes(x=V1, y=V2, color=relapse1am_whz_and_muac)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = relapse1am_whz_and_muac), size = 0.5) + 
+  ggtitle("PCoA of Species Level Composition by Nutritional Status at 1 Month Follow-up") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("sustained recovery" = "darkblue", "AM" = "green")) + labs(color = "Nutritional Status \nat 1 Month Follow-up", ) + 
+  xlab("V1 (0.142837)") +
+  ylab("V2 (0.2541382)") 
+#stats
+relapse1am_whz_and_mauc_samples <- metadata$Sample[!is.na(metadata$relapse1am_whz_and_muac)]
+wide_species_bray_stats <- read.csv("./wide_species.csv")
+relapse1am_whz_and_mauc_wide_species <- wide_species_bray_stats[wide_species_bray_stats$Sample %in% relapse1am_whz_and_mauc_samples, ]
+relapse1am_whz_and_mauc_wide_species[is.na(relapse1am_whz_and_mauc_wide_species)] <- 0
+relapse1am_whz_and_mauc_wide_species <- relapse1am_whz_and_mauc_wide_species[,-1]
+relapse1am_whz_and_muac_Bray<-vegdist(relapse1am_whz_and_mauc_wide_species, method = "bray")
+
+relapse1am_whz_and_muac_BrayDFmeta <- BrayDFmeta[!is.na(BrayDFmeta$relapse1am_whz_and_muac),]
+adonis2(relapse1am_whz_and_muac_Bray~relapse1am_whz_and_muac, data = relapse1am_whz_and_muac_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+```
+#Significant results for Fig 1D
+```{r}
+#using linear mixed effect models to asses significant phyla associated with relapse status at 1 month follow up 
+Maaslin_metadata <- metadata
+row.names(Maaslin_metadata) <- Maaslin_metadata$Sample
+wide_phyla <- read.csv("./wide_phyla.csv")
+row.names(wide_phyla) <- wide_phyla$Sample
+wide_phyla <- wide_phyla[,-1]
+wide_phyla[is.na(wide_phyla)] <- 0
+
+Maaslin_metadata_filtered<-Maaslin_metadata |>
+  filter(fullrecovery0 != "0")
+Maaslin_metadata_filtered<-Maaslin_metadata_filtered |>
+  filter(relapse1am_whz_and_muac != "NA")
+
+fit_data = Maaslin2(
+    input_data = wide_phyla, 
+    input_metadata = Maaslin_metadata_filtered, 
+    output = "phyla_maaslin_relapse1am_whz_and_muac", 
+    fixed_effects = c("relapse1am_whz_and_muac","female","age0","muac1","whz1","waz1","haz1","muacchange0to1","whzchange0to1","wazchange0to1","hazchange0to1","weightchange0to1","heightchange0to1"),
+    random_effects = c("month0","clinic"),
+    reference = c('relapse1am_whz_and_muac,0')
+)
+```
+
+
+
