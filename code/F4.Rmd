@@ -1,0 +1,98 @@
+---
+title: "F4"
+author: "CY"
+date: "2025-10-30"
+output: html_document
+---
+
+```{r}
+#change this to the location of your data 
+knitr::opts_knit$set(root.dir ="/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F4")
+setwd("/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F4")
+```
+#load in packages for analysis 
+```{r}
+library(Maaslin2) #3.21
+library(dplyr) #1.1.4
+library(tidyverse) #2.0.0
+```
+#load in metadata 
+```{r}
+#metadata file
+metadata <- read.csv("./metadata.csv")
+metadata <- metadata |>
+  filter(relapse1am_whz_and_muac != "NA")
+```
+
+#Fig 4 Maaslin runs for all significant results 
+```{r}
+#species 
+wide_species <- read.delim("./wide_species.csv", header = TRUE, sep = ',')
+Maaslin_metadata_species <- metadata
+row.names(wide_species) <- wide_species$Sample
+row.names(Maaslin_metadata_species) <- Maaslin_metadata_species$Sample
+wide_species <- wide_species[,-1]
+wide_species[is.na(wide_species)] <- 0
+
+fit_data = Maaslin2(
+    input_data = wide_species, 
+    input_metadata = Maaslin_metadata_species, 
+    output = "species_maaslin_relapse1am_whz_and_muac", 
+    fixed_effects = c("relapse1am_whz_and_muac","female","age0","muac1","whz1","waz1","haz1","muacchange0to1","whzchange0to1","wazchange0to1","hazchange0to1","weightchange0to1","heightchange0to1"),
+    random_effects = c("month0","clinic"),
+    reference = c('relapse1am_whz_and_muac,0')
+)
+
+#ARGs
+Maaslin_metadata_ARG <- metadata
+row.names(Maaslin_metadata_ARG) <- Maaslin_metadata_ARG$Sample
+Df_Family <- read.delim("./cat_shortbred_Family_only.csv", header = TRUE, sep = ',')
+Df_Family <- pivot_wider(Df_Family, names_from = Family, values_from = Count)
+Df_Family <- as.data.frame(Df_Family)
+Df_Family[is.na(Df_Family)] <- 0
+row.names(Df_Family) <- Df_Family$Sample
+Df_Family <- Df_Family[,-1]
+
+fit_data = Maaslin2(
+    input_data = Df_Family, 
+    input_metadata = Maaslin_metadata, 
+    output = "AMR_maaslin_relapse1am_whz_and_muac_metrics", 
+    fixed_effects = c("relapse1am_whz_and_muac","female","age0","muac1","whz1","waz1","haz1","muacchange0to1","whzchange0to1","wazchange0to1","hazchange0to1","weightchange0to1","heightchange0to1"),
+    random_effects = c("month0","clinic"),
+    reference = c('relapse1am_whz_and_muac,0')
+)
+
+#KEGG and GO terms
+Maaslin_metadata_function <- metadata
+ko_names <- read.delim("./ko_names.csv", header = TRUE, sep = ',')
+go_names <- read.delim("./go_names.csv", header = TRUE, sep = ',')
+Maaslin_ko_names <- ko_names
+Maaslin_go_names <- go_names
+row.names(Maaslin_go_names) <- Maaslin_go_names$Sample
+row.names(Maaslin_ko_names) <- Maaslin_ko_names$Sample
+row.names(Maaslin_metadata_function) <- Maaslin_metadata_function$Sample
+Maaslin_go_names <- Maaslin_go_names[,-1]
+Maaslin_ko_names <- Maaslin_ko_names[,-1]
+Maaslin_metadata_function <- Maaslin_metadata_function[,-1]
+
+fit_data = Maaslin2(
+    input_data = Maaslin_ko_names, 
+    input_metadata = Maaslin_metadata, 
+    output = "ko_names_relapse1am_whz_and_muac", 
+    fixed_effects = c("relapse1am_whz_and_muac","female","age0","muac1","whz1","waz1","haz1","muacchange0to1","whzchange0to1","wazchange0to1","hazchange0to1","weightchange0to1","heightchange0to1"),
+    random_effects = c("month0","clinic"),
+    reference = c('relapse1am_whz_and_muac,0')
+    )
+
+fit_data = Maaslin2(
+    input_data = Maaslin_go_names, 
+    input_metadata = Maaslin_metadata, 
+    output = "go_names_relapse1am_whz_and_muac", 
+    fixed_effects = c("relapse1am_whz_and_muac","female","age0","muac1","whz1","waz1","haz1","muacchange0to1","whzchange0to1","wazchange0to1","hazchange0to1","weightchange0to1","heightchange0to1"),
+    random_effects = c("month0","clinic"),
+    reference = c('relapse1am_whz_and_muac,0')
+    )
+
+```
+
+
