@@ -1,0 +1,185 @@
+---
+title: "F2"
+author: "CY"
+date: "2025-10-30"
+output: html_document
+---
+#set working directory to pull and push files to/from
+```{r setup}
+#change this to the location of your data 
+knitr::opts_knit$set(root.dir ="/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F2")
+setwd("/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F2")
+```
+#load in packages for analysis 
+```{r}
+library(ggplot2) #4.0.0
+library(permute) #0.9.8
+library(lattice) #0.22.7
+library(vegan) #2.7.2
+library(dplyr) #1.1.4
+library(labdsv) #2.1.2
+library(tidyverse) #2.0.0
+library(ggpubr) #0.6.2
+library(rstatix) #0.7.3
+library(FSA) #0.10.0
+library(viridis) #0.6.5
+library(plyr) #1.8.9
+library(Maaslin2) #3.21
+```
+#load in datatables 
+```{r}
+#metadata file
+metadata <- read.csv("./metadata.csv")
+#shortbred ARG hits in the long format 
+shortbred_family_long <- read.delim("./cat_shortbred_Family_only.csv", header = TRUE, sep = ',')
+#pivot to the wide format 
+shortbred_family_wide <- pivot_wider(shortbred_family_long, names_from = Family, values_from = Count)
+colnames(shortbred_family_wide)[1] ="Sample"
+shortbred_family_wide <- as.data.frame(shortbred_family_wide)
+shortbred_family_wide[is.na(shortbred_family_wide)] <- 0
+shortbred_family_metadata <- full_join(shortbred_family_wide, metadata, by = "Sample")
+#file of sum of total ARG RPKMs
+AMR_abundance <- read.delim("./AMR_counts.csv", header = TRUE, sep = ',')
+#file of sum of beta lactam ARG RPKMs and proportion of beta lactam ARG RPKMs to total ARG RPKMs
+beta_lactam_AMR_abundance <- read.delim("./beta_lactam_AMR_counts.csv", header = TRUE, sep = ',')
+#file of beta lactam or other AMR binary hits and beta lactam ARG to total ARG proportion 
+beta_lactam_or_other_AMR_binary_hits <- read.delim("./beta_lactam_AMR_binary_hits.csv", header = TRUE, sep = ',')
+```
+#join datatables with metadata for plotting 
+```{r}
+#metadata and ARG RPKM total file 
+shortbred_and_metadata_AMR_abundance <- full_join(metadata, AMR_abundance, by = "Sample")
+#metadata and beta lactam ARG RPKM & proportion file 
+colnames(beta_lactam_AMR_abundance)[1] <- "Sample"
+shortbred_and_metadata_beta_lactam_AMR_abundance <- full_join(metadata, beta_lactam_AMR_abundance, by = "Sample")
+#metadata and beta lactam and other ARG binary hits & proportion file 
+colnames(beta_lactam_or_other_AMR_binary_hits)[1] <- "Sample"
+shortbred_and_metadata_beta_lactam_AMR_binary_hits <- full_join(metadata, beta_lactam_or_other_AMR_binary_hits, by = "Sample")
+```
+#calculate bray curtis for comparing AMR profiles by nutritional status at 1 month follow up 
+```{r}
+shortbred_family_wide_bray <- shortbred_family_wide
+row.names(shortbred_family_wide_bray) <- shortbred_family_wide_bray$Sample
+shortbred_family_wide_bray <- shortbred_family_wide_bray[,-1]
+shortbred_Bray <-vegdist(shortbred_family_wide_bray, method = "bray")
+shortbred_pco.brayDF<-pco(shortbred_Bray, k =4 )
+shortbred_BrayDF<-as.data.frame(shortbred_pco.brayDF$points)
+
+shortbred_BrayDF$Sample<-row.names(shortbred_BrayDF)
+shortbred_BrayDFmeta<-join(shortbred_BrayDF, metadata, by = "Sample")
+
+shortbred_EigenBray<- rbind(SD = sqrt(shortbred_pco.brayDF$eig),Proportion = shortbred_pco.brayDF$eig/sum(shortbred_pco.brayDF$eig),Cumulative = cumsum(shortbred_pco.brayDF$eig)/sum(shortbred_pco.brayDF$eig))
+#V1 = 23.5 and V2 = 11.3
+shortbred_BrayDF$Sample=NULL
+
+shortbred_BrayDFmeta$relapse1am_whz_and_muac <- factor(shortbred_BrayDFmeta$relapse1am_whz_and_muac, levels = c(0, 1), labels = c("sustained recovery", "MAM"))
+```
+#F2A ARG abundances by nutritional status at 1 month follow up 
+```{r}
+ggplot(shortbred_and_metadata_AMR_abundance, aes(x=as.factor(relapse1am_whz_and_muac), y=AMR)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("AMR Abundance by Nutritional \nStatus at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("AMR Abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=12), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=14)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "AM"))
+#stats
+aggregate(AMR ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_AMR_abundance$AMR, shortbred_and_metadata_AMR_abundance$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final edits of font and labels done in illustrator 
+```
+#F2B unique ARG hits by nutritional status at 1 month follow up 
+```{r}
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(relapse1am_whz_and_muac), y=Total)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique AMR hits by Nutritional \nStatus at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Unique AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=10), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=11)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM"))
+#stats 
+aggregate(Total ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Total, shortbred_and_metadata_beta_lactam_AMR_binary_hits$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final edits of font and labels done in illustrator 
+```
+#F2C beta lactam ARG proportion by nutritional status at 1 month follow up 
+```{r}
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(relapse1am_whz_and_muac), y=Beta_Lactam_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta Lactam AMR Proportion by \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Beta Lactam AMR Proportion") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=10), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM"))
+#stats
+aggregate(Beta_Lactam_prop ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam_prop, shortbred_and_metadata_beta_lactam_AMR_abundance$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final edits of font and labels done in illustrator 
+```
+#F2D beta lactam unique hits proportion by nutritional status at 1 month follow up 
+```{r}
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(relapse1am_whz_and_muac), y=hit_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Proportion of Unique Beta Lactam AMR Hits \nby Nutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Proportion of Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=10), axis.title.x=element_text(size=10), axis.title.y = element_text(size=9), axis.text.y = element_text(size=12), plot.title = element_text(size=9)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM"))
+#stats
+aggregate(hit_prop ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$hit_prop, shortbred_and_metadata_beta_lactam_AMR_binary_hits$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final edits of font and labels done in illustrator 
+```
+#F2E PcoA of AMR profiles by nutritional status at 1 month follow up 
+```{r}
+shortbred_BrayDFmeta |> 
+  filter(relapse1am_whz_and_muac == c("sustained recovery", "MAM")) |>
+  ggplot(aes(x=V1, y=V2, color=relapse1am_whz_and_muac)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = relapse1am_whz_and_muac), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of AMR Gene Profiles by Nutritional Status \nat 1 Month Follow-up") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("sustained recovery" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat 1 Month Follow-up", ) + 
+  xlab("V1 (0.2534066)") +
+  ylab("V2 (0.4266711)") 
+
+#stats
+family_long2 <- read.delim("./cat_shortbred_Family_only.csv", header = TRUE, sep = ',')
+family_wide2 <- pivot_wider(family_long2, names_from = Family, values_from = Count)
+colnames(family_wide2)[1] ="Sample"
+family_wide2 <- as.data.frame(family_wide2)
+family_wide2[is.na(family_wide2)] <- 0
+
+relapse1am_whz_and_mauc_samples <- metadata$Sample[!is.na(metadata$relapse1am_whz_and_muac)]
+relapse1am_whz_and_mauc_family_wide <- family_wide2[family_wide2$Sample %in% relapse1am_whz_and_mauc_samples, ]
+relapse1am_whz_and_mauc_family_wide <- relapse1am_whz_and_mauc_family_wide[,-1]
+relapse1am_whz_and_muac_shortbred_Bray<-vegdist(relapse1am_whz_and_mauc_family_wide, method = "bray")
+
+relapse1am_whz_and_muac_shortbred_BrayDFmeta <- shortbred_BrayDFmeta[!is.na(shortbred_BrayDFmeta$relapse1am_whz_and_muac),]
+
+adonis2(relapse1am_whz_and_muac_shortbred_Bray~relapse1am_whz_and_muac, data = relapse1am_whz_and_muac_shortbred_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+
+#final edits of figure legends/font are done in illustrator 
+```
+
+
