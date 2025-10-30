@@ -1,0 +1,200 @@
+---
+title: "F3"
+author: "CY"
+date: "2025-10-30"
+output: html_document
+---
+
+#set working directory to pull and push files to/from
+```{r setup}
+#change this to the location of your data 
+knitr::opts_knit$set(root.dir ="/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F3")
+setwd("/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/F3")
+```
+#load in packages for analysis 
+```{r}
+library(ggplot2) #4.0.0
+library(permute) #0.9.8
+library(lattice) #0.22.7
+library(vegan) #2.7.2
+library(dplyr) #1.1.4
+library(labdsv) #2.1.2
+library(tidyverse) #2.0.0
+library(ggpubr) #0.6.2
+library(rstatix) #0.7.3
+library(FSA) #0.10.0
+library(viridis) #0.6.5
+library(plyr) #1.8.9
+library(Maaslin2) #3.21
+```
+#load in data files 
+```{r}
+#metadata file
+metadata <- read.csv("./metadata.csv")
+#KEGG output 
+ko_names <- read.delim("./ko_names.csv", header = TRUE, sep = ',')
+#GO output 
+go_names <- read.delim("./go_names.csv", header = TRUE, sep = ',')
+```
+#format data tables 
+```{r}
+ko_names[is.na(ko_names)] <- 0
+go_names[is.na(go_names)] <- 0
+colnames(ko_names)[1] ="Sample"
+colnames(go_names)[1] ="Sample"
+```
+#plot out number of pathways against different variables 
+```{r}
+ko_names_pathways <- ko_names
+ko_names_pathways$pathways <- 0
+ko_names_pathways$pathways <- rowSums(ko_names_pathways > 0)
+ko_names_pathways <- rownames_to_column(ko_names_pathways, var = "Sample")
+ko_names_pathways$total <- 0
+ko_names_pathways$total <- rowSums( ko_names_pathways[,2:6150] )
+ko_names_pathways_metadata <- full_join(metadata, ko_names_pathways, by = "Sample")
+
+go_names_pathways <- go_names
+go_names_pathways$pathways <- 0
+go_names_pathways$pathways <- rowSums(go_names_pathways > 0)
+go_names_pathways <- rownames_to_column(go_names_pathways, var = "Sample")
+go_names_pathways$total <- 0
+go_names_pathways$total <- rowSums( go_names_pathways[,2:6701] )
+go_names_pathways_metadata <- full_join(metadata, go_names_pathways, by = "Sample")
+```
+#Bray curtis calculations
+```{r}
+row.names(ko_names) <- ko_names$Sample
+ko_names <- ko_names[,-1]
+koBray <-vegdist(ko_names, method = "bray")
+ko_pco.brayDF<-pco(koBray, k =4 )
+ko_BrayDF<-as.data.frame(ko_pco.brayDF$points)
+
+row.names(go_names) <- go_names$Sample
+go_names <- go_names[,-1]
+goBray <-vegdist(go_names, method = "bray")
+go_pco.brayDF<-pco(goBray, k =4 )
+go_BrayDF<-as.data.frame(go_pco.brayDF$points)
+
+```
+###Generation of Eigen values for pco
+```{r}
+ko_BrayDF$Sample<-row.names(ko_BrayDF)
+ko_BrayDFmeta<-join(ko_BrayDF, metadata, by = "Sample")
+
+go_BrayDF$Sample<-row.names(go_BrayDF)
+go_BrayDFmeta<-join(go_BrayDF, metadata, by = "Sample")
+
+### Eigenvalues for all data##
+ko_EigenBray<- rbind(SD = sqrt(ko_pco.brayDF$eig),Proportion = ko_pco.brayDF$eig/sum(ko_pco.brayDF$eig),Cumulative = cumsum(ko_pco.brayDF$eig)/sum(ko_pco.brayDF$eig))
+
+go_EigenBray<- rbind(SD = sqrt(go_pco.brayDF$eig),Proportion = go_pco.brayDF$eig/sum(go_pco.brayDF$eig),Cumulative = cumsum(go_pco.brayDF$eig)/sum(go_pco.brayDF$eig))
+
+ko_BrayDF$Sample=NULL
+go_BrayDF$Sample=NULL
+```
+#F3A total KEGG pathways by relapse status at 1 month follow up 
+```{r}
+ggplot(ko_names_pathways_metadata, aes(x=as.factor(relapse1am_whz_and_muac), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique KEGG Pathways by \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Number of Unique Functional Pathways (KEGG)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM"))
+
+#stats 
+aggregate(pathways ~ relapse1am_whz_and_muac, data = ko_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(ko_names_pathways_metadata$pathways, ko_names_pathways_metadata$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final labels/fonts edited in illustrator 
+```
+#F3B total GO pathways by relpase status at 1 month follow up 
+```{r}
+ggplot(go_names_pathways_metadata, aes(x=as.factor(relapse1am_whz_and_muac), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique GO Pathways by \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Number of Unique Functional Pathways (GO)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "MAM"))
+#stats
+aggregate(pathways ~ relapse1am_whz_and_muac, data = go_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(go_names_pathways_metadata$pathways, go_names_pathways_metadata$relapse1am_whz_and_muac, p.adjust.method = "BH")
+#final labels/fonts edited in illustrator 
+```
+#F3C PCoA of KEGG pathways by relapse status at 1 month follow up 
+```{r}
+ko_BrayDFmeta$relapse1am_whz_and_muac <- factor(ko_BrayDFmeta$relapse1am_whz_and_muac, levels = c(0, 1), labels = c("sustained recovery", "MAM"))
+
+ko_BrayDFmeta |> 
+  filter(relapse1am_whz_and_muac == c("sustained recovery", "MAM")) |>
+  ggplot(aes(x=V1, y=V2, color=relapse1am_whz_and_muac)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = relapse1am_whz_and_muac), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of KEGG Pathways by Nutritional Status \nat 1 Month Follow-up") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("sustained recovery" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat 1 Month Follow-up", ) + 
+  xlab("V1 (0.7256063)") +
+  ylab("V2 (0.8604962)") 
+```
+#F3D PCoA of GO pathways by relapse status at 1 month follow up 
+```{r}
+go_BrayDFmeta$relapse1am_whz_and_muac <- factor(go_BrayDFmeta$relapse1am_whz_and_muac, levels = c(0, 1), labels = c("sustained recovery", "MAM"))
+
+go_BrayDFmeta |> 
+  filter(relapse1am_whz_and_muac == c("sustained recovery", "MAM")) |>
+  ggplot(aes(x=V1, y=V2, color=relapse1am_whz_and_muac)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = relapse1am_whz_and_muac), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of KEGG Pathways by Nutritional Status \nat 1 Month Follow-up") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("sustained recovery" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat 1 Month Follow-up", ) + 
+  xlab("V1 (0.7256063)") +
+  ylab("V2 (0.8604962)") 
+```
+#stats for F3C and F3D
+```{r}
+relapse1am_whz_and_mauc_samples <- metadata$Sample[!is.na(metadata$relapse1am_whz_and_muac)]
+#ko
+ko_names2 <- read.delim("./ko_names.csv", header = TRUE, sep = ',')
+colnames(ko_names2)[1] ="Sample"
+relapse1am_whz_and_mauc_ko_names2 <- ko_names2[ko_names2$Sample %in% relapse1am_whz_and_mauc_samples, ]
+relapse1am_whz_and_mauc_ko_names2[is.na(relapse1am_whz_and_mauc_ko_names2)] <- 0
+relapse1am_whz_and_mauc_ko_names2 <- relapse1am_whz_and_mauc_ko_names2[,-1]
+relapse1am_whz_and_muac_koBray<-vegdist(relapse1am_whz_and_mauc_ko_names2, method = "bray")
+relapse1am_whz_and_muac_ko_BrayDFmeta <- ko_BrayDFmeta[!is.na(ko_BrayDFmeta$relapse1am_whz_and_muac),]
+
+adonis2(relapse1am_whz_and_muac_koBray~relapse1am_whz_and_muac, data = relapse1am_whz_and_muac_ko_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+#go
+go_names2 <- read.delim("./go_names.csv", header = TRUE, sep = ',')
+colnames(go_names2)[1] ="Sample"
+relapse1am_whz_and_mauc_go_names2 <- go_names2[go_names2$Sample %in% relapse1am_whz_and_mauc_samples, ]
+relapse1am_whz_and_mauc_go_names2[is.na(relapse1am_whz_and_mauc_go_names2)] <- 0
+relapse1am_whz_and_mauc_go_names2 <- relapse1am_whz_and_mauc_go_names2[,-1]
+relapse1am_whz_and_muac_goBray<-vegdist(relapse1am_whz_and_mauc_go_names2, method = "bray")
+relapse1am_whz_and_muac_go_BrayDFmeta <- go_BrayDFmeta[!is.na(go_BrayDFmeta$relapse1am_whz_and_muac),]
+
+adonis2(relapse1am_whz_and_muac_goBray~relapse1am_whz_and_muac, data = relapse1am_whz_and_muac_go_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+```
+
