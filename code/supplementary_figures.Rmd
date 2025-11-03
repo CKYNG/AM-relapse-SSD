@@ -1,0 +1,1307 @@
+---
+title: "Supplementary_Figures"
+author: "CY"
+date: "2025-10-30"
+output: html_document
+---
+#set working directory to pull and push files to/from
+```{r setup}
+#change this to the location of your data 
+knitr::opts_knit$set(root.dir ="/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/Supplementary_figures")
+setwd("/Users/Connie/Library/CloudStorage/Box-Box/DJSchwartz_Lab/Manuscripts/2025_Connie_malnutrition/github/R/Supplementary_figures")
+```
+#load in packages for analysis 
+```{r}
+library(ggplot2) #4.0.0
+library(permute) #0.9.8
+library(lattice) #0.22.7
+library(vegan) #2.7.2
+library(dplyr) #1.1.4
+library(labdsv) #2.1.2
+library(tidyverse) #2.0.0
+library(ggpubr) #0.6.2
+library(rstatix) #0.7.3
+library(FSA) #0.10.0
+library(viridis) #0.6.5
+library(plyr) #1.8.9
+library(Maaslin2) #3.21
+```
+#load in data tables 
+```{r}
+#MetaPhlAn4 species output in the wide format
+wide_species <- read.csv("./wide_species.csv") 
+#MetaPhlAn4 phyla output in the long format 
+long_phyla <- read.csv("./long_phyla.csv")
+#metadata file 
+metadata <- read.csv("./metadata_sup.csv")
+#shortbred ARG hits in the long format 
+shortbred_family_long <- read.delim("./cat_shortbred_Family_only.csv", header = TRUE, sep = ',')
+#pivot to the wide format 
+shortbred_family_wide <- pivot_wider(shortbred_family_long, names_from = Family, values_from = Count)
+colnames(shortbred_family_wide)[1] ="Sample"
+shortbred_family_wide <- as.data.frame(shortbred_family_wide)
+shortbred_family_wide[is.na(shortbred_family_wide)] <- 0
+shortbred_family_metadata <- full_join(shortbred_family_wide, metadata, by = "Sample")
+#file of sum of total ARG RPKMs
+AMR_abundance <- read.delim("./AMR_counts.csv", header = TRUE, sep = ',')
+#file of sum of beta lactam ARG RPKMs and proportion of beta lactam ARG RPKMs to total ARG RPKMs
+beta_lactam_AMR_abundance <- read.delim("./beta_lactam_AMR_counts.csv", header = TRUE, sep = ',')
+#file of beta lactam or other AMR binary hits and beta lactam ARG to total ARG proportion 
+beta_lactam_or_other_AMR_binary_hits <- read.delim("./beta_lactam_AMR_binary_hits.csv", header = TRUE, sep = ',')
+#metadata and ARG RPKM total file 
+shortbred_and_metadata_AMR_abundance <- full_join(metadata, AMR_abundance, by = "Sample")
+#metadata and beta lactam ARG RPKM & proportion file 
+colnames(beta_lactam_AMR_abundance)[1] <- "Sample"
+shortbred_and_metadata_beta_lactam_AMR_abundance <- full_join(metadata, beta_lactam_AMR_abundance, by = "Sample")
+#metadata and beta lactam and other ARG binary hits & proportion file 
+colnames(beta_lactam_or_other_AMR_binary_hits)[1] <- "Sample"
+shortbred_and_metadata_beta_lactam_AMR_binary_hits <- full_join(metadata, beta_lactam_or_other_AMR_binary_hits, by = "Sample")
+#KEGG output 
+ko_names <- read.delim("./ko_names.csv", header = TRUE, sep = ',')
+#GO output 
+go_names <- read.delim("./go_names.csv", header = TRUE, sep = ',')
+```
+#format data for species richness/shannon diversity 
+```{r}
+#convert NAs in wide species table to 0s 
+wide_species[is.na(wide_species)] <- 0
+#convert empty spaces in metadata file to NAs 
+metadata[metadata == ""] <- NA
+```
+#format data for KEGG and GO analysis 
+```{r}
+ko_names[is.na(ko_names)] <- 0
+go_names[is.na(go_names)] <- 0
+colnames(ko_names)[1] ="Sample"
+colnames(go_names)[1] ="Sample"
+ko_names_pathways <- ko_names
+ko_names_pathways$pathways <- 0
+ko_names_pathways$pathways <- rowSums(ko_names_pathways > 0)
+ko_names_pathways <- rownames_to_column(ko_names_pathways, var = "Sample")
+ko_names_pathways$total <- 0
+ko_names_pathways$total <- rowSums( ko_names_pathways[,2:6150] )
+ko_names_pathways_metadata <- full_join(metadata, ko_names_pathways, by = "Sample")
+
+go_names_pathways <- go_names
+go_names_pathways$pathways <- 0
+go_names_pathways$pathways <- rowSums(go_names_pathways > 0)
+go_names_pathways <- rownames_to_column(go_names_pathways, var = "Sample")
+go_names_pathways$total <- 0
+go_names_pathways$total <- rowSums( go_names_pathways[,2:6701] )
+go_names_pathways_metadata <- full_join(metadata, go_names_pathways, by = "Sample")
+```
+#generate shannon diversity for species 
+```{r}
+row.names(wide_species) <- wide_species$Sample
+wide_species <- wide_species[,-1]
+shannDiv<-as.data.frame(diversity(wide_species, index="shannon"))
+shannDivrich<-data.frame(
+  Sample=row.names(shannDiv),
+  shannon=diversity(wide_species),
+  richness=specnumber(wide_species)
+)
+```
+#join metadata with table containing species richness and shannon diversity 
+```{r}
+metadata_wide_species <- full_join(metadata, shannDivrich, by = "Sample")
+metadata_wide_species_older <- metadata_wide_species |>
+  filter(age_cat == "older_than_1_year")
+metadata_wide_species_younger <- metadata_wide_species |>
+  filter(age_cat == "younger_than_1_year")
+```
+#aggregate data from long phyla tables to generate average phyla abundances for children who were discharged recovered vs MAM
+```{r}
+#join long phyla table with metadata 
+metadata_long_phyla <- full_join(metadata,long_phyla, by ="Sample")
+
+#create sub data frames of children who recovered recovery vs relapsed to AM 
+metadata_long_phyla_recovered <- metadata_long_phyla[which(metadata_long_phyla$fullrecovery0 == "1"),] 
+metadata_long_phyla_MAM <- metadata_long_phyla[which(metadata_long_phyla$fullrecovery0 == "0"),]
+#aggregate phyla abundances for individual outcomes 
+#recovered
+metadata_long_phyla_recoveredave<- aggregate(Abundance~Sample + Phyla + fullrecovery0, data= metadata_long_phyla_recovered, FUN=sum)
+metadata_long_phyla_recoveredave<- aggregate(Abundance~Phyla + fullrecovery0, data= metadata_long_phyla_recovered, FUN=mean)
+metadata_long_phyla_recoveredave<- metadata_long_phyla_recoveredave[which(metadata_long_phyla_recoveredave$Abundance > 0),]
+metadata_long_phyla_recoveredave$uniqSample<-paste(metadata_long_phyla_recoveredave$fullrecovery0)
+metadata_long_phyla_recoveredave$normalabundance<-metadata_long_phyla_recoveredave$Abundance/sum(metadata_long_phyla_recoveredave$Abundance)*100
+#discharged MAM
+metadata_long_phyla_MAMave<- aggregate(Abundance~Sample + Phyla + fullrecovery0, data= metadata_long_phyla_MAM, FUN=sum)
+metadata_long_phyla_MAMave<- aggregate(Abundance~Phyla + fullrecovery0, data= metadata_long_phyla_MAM, FUN=mean)
+metadata_long_phyla_MAMave<- metadata_long_phyla_MAMave[which(metadata_long_phyla_MAMave$Abundance > 0),]
+metadata_long_phyla_MAMave$uniqSample<-paste(metadata_long_phyla_MAMave$fullrecovery0)
+metadata_long_phyla_MAMave$normalabundance<-metadata_long_phyla_MAMave$Abundance/sum(metadata_long_phyla_MAMave$Abundance)*100
+#rbind dataframes back together 
+metadata_long_phyla_0mo_phyla_ave<-rbind(metadata_long_phyla_recoveredave,metadata_long_phyla_MAMave)
+#create a bin for all phyla abundances less than 1% 
+metadata_long_phyla_0mo_phyla_ave$Phyla[metadata_long_phyla_0mo_phyla_ave$Abundance<1] <- "phyla abund <1%"
+```
+#calculate Bray Curtis dissimilarity for species
+```{r}
+Bray <-vegdist(wide_species, method = "bray")
+pco.brayDF<-pco(Bray, k =4 )
+BrayDF<-as.data.frame(pco.brayDF$points)
+BrayDF$Sample<-row.names(BrayDF)
+BrayDFmeta<-join(BrayDF, metadata, by = "Sample")
+### Eigenvalues for all data##
+EigenBray<- rbind(SD = sqrt(pco.brayDF$eig),Proportion = pco.brayDF$eig/sum(pco.brayDF$eig),Cumulative = cumsum(pco.brayDF$eig)/sum(pco.brayDF$eig))
+BrayDF$Sample=NULL
+BrayDFmeta$fullrecovery0 <- factor(BrayDFmeta$fullrecovery0, levels = c(0, 1), labels = c("MAM", "not AM"))
+```
+#calculate Bray Curtis dissimilarity for AMR profiles
+```{r}
+shortbred_family_wide_bray <- shortbred_family_wide
+row.names(shortbred_family_wide_bray) <- shortbred_family_wide_bray$Sample
+shortbred_family_wide_bray <- shortbred_family_wide_bray[,-1]
+shortbred_Bray <-vegdist(shortbred_family_wide_bray, method = "bray")
+shortbred_pco.brayDF<-pco(shortbred_Bray, k =4 )
+shortbred_BrayDF<-as.data.frame(shortbred_pco.brayDF$points)
+
+shortbred_BrayDF$Sample<-row.names(shortbred_BrayDF)
+shortbred_BrayDFmeta<-join(shortbred_BrayDF, metadata, by = "Sample")
+
+shortbred_EigenBray<- rbind(SD = sqrt(shortbred_pco.brayDF$eig),Proportion = shortbred_pco.brayDF$eig/sum(shortbred_pco.brayDF$eig),Cumulative = cumsum(shortbred_pco.brayDF$eig)/sum(shortbred_pco.brayDF$eig))
+#V1 = 23.5 and V2 = 11.3
+shortbred_BrayDF$Sample=NULL
+
+shortbred_BrayDFmeta$fullrecovery0 <- factor(shortbred_BrayDFmeta$fullrecovery0, levels = c(1, 0), labels = c("not AM", "MAM"))
+```
+#calculate Bray Curtis dissimilarity for KEGG and GO profiles 
+```{r}
+row.names(ko_names) <- ko_names$Sample
+ko_names <- ko_names[,-1]
+koBray <-vegdist(ko_names, method = "bray")
+ko_pco.brayDF<-pco(koBray, k =4 )
+ko_BrayDF<-as.data.frame(ko_pco.brayDF$points)
+
+row.names(go_names) <- go_names$Sample
+go_names <- go_names[,-1]
+goBray <-vegdist(go_names, method = "bray")
+go_pco.brayDF<-pco(goBray, k =4 )
+go_BrayDF<-as.data.frame(go_pco.brayDF$points)
+
+ko_BrayDF$Sample<-row.names(ko_BrayDF)
+ko_BrayDFmeta<-join(ko_BrayDF, metadata, by = "Sample")
+
+go_BrayDF$Sample<-row.names(go_BrayDF)
+go_BrayDFmeta<-join(go_BrayDF, metadata, by = "Sample")
+
+### Eigenvalues for all data##
+ko_EigenBray<- rbind(SD = sqrt(ko_pco.brayDF$eig),Proportion = ko_pco.brayDF$eig/sum(ko_pco.brayDF$eig),Cumulative = cumsum(ko_pco.brayDF$eig)/sum(ko_pco.brayDF$eig))
+
+go_EigenBray<- rbind(SD = sqrt(go_pco.brayDF$eig),Proportion = go_pco.brayDF$eig/sum(go_pco.brayDF$eig),Cumulative = cumsum(go_pco.brayDF$eig)/sum(go_pco.brayDF$eig))
+
+ko_BrayDF$Sample=NULL
+go_BrayDF$Sample=NULL
+
+ko_BrayDFmeta$fullrecovery0 <- factor(ko_BrayDFmeta$fullrecovery0, levels = c(1, 0), labels = c("not AM", "MAM"))
+
+go_BrayDFmeta$fullrecovery0 <- factor(go_BrayDFmeta$fullrecovery0, levels = c(1, 0), labels = c("not AM", "MAM"))
+```
+#S1
+```{r}
+#A species richness based on nutritional status at discharge 
+ggplot(metadata_wide_species, aes(x=as.factor(fullrecovery0), y=richness)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Species Richness Based \non Nutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Number of Species") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=16), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), axis.title = element_text(size=16)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats
+aggregate(richness ~ fullrecovery0, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$richness, metadata_wide_species$fullrecovery0, p.adjust.method = "BH")
+
+#B shannon diversity based on nutritional status at discharge 
+ggplot(metadata_wide_species, aes(x=as.factor(fullrecovery0), y=shannon)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Shannon Diversity Based \non Nutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Shannon Diversity") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=16), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), axis.title = element_text(size=16)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(shannon ~ fullrecovery0, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$shannon, metadata_wide_species$fullrecovery0, p.adjust.method = "BH")
+```
+#S2
+```{r}
+#A richness based on sex 
+ggplot(metadata_wide_species, aes(x=as.factor(female), y=richness)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Species Richness Based on Sex") +
+  xlab("Sex") +
+  ylab("Number of Species") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=16), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=8.2)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(richness ~ female, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$richness, metadata_wide_species$female, p.adjust.method = "BH")
+
+#B shannon diversity based on sex 
+ggplot(metadata_wide_species, aes(x=as.factor(female), y=shannon)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Differences in Shannon Diversity Based on Sex") +
+  xlab("Sex") +
+  ylab("Shannon Diversity") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=16), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(shannon ~ female, data = metadata_wide_species, FUN = median)
+pairwise.wilcox.test(metadata_wide_species$shannon, metadata_wide_species$female, p.adjust.method = "BH")
+
+#C richness based on age 
+ggplot(metadata_wide_species, aes(x = age0, y = richness)) +
+  ggtitle("Differences in Species Richness \nBased on Age") +
+  xlab("Age (months)") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 12)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richage0 <- lm(richness ~ age0, data = metadata_wide_species)
+summary(regression_model_richage0)
+
+#D shannon diversity by age 
+ggplot(metadata_wide_species, aes(x = age0, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity \nBased on Age") +
+  xlab("Age (months)") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 12)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_shanage0 <- lm(shannon ~ age0, data = metadata_wide_species)
+summary(regression_model_shanage0)
+```
+#S3 
+```{R}
+#A richness based on whz measurement at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = whz1, y = richness)) +
+  ggtitle("Differences in Species Richness Based\non WHZ at 1 Month Follow-up") +
+  xlab("WHZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+
+#stats
+regression_model_richwhz1 <- lm(richness ~ whz1, data = metadata_wide_species)
+summary(regression_model_richwhz1)
+
+#B richness based on muac measurement at 1 month follow up (older vs younger than 1 year of age)
+ggplot(metadata_wide_species, aes(x = muacchange0to1, y = richness)) +
+  ggtitle("Differences in Species Richness Based on Change \nin MUAC between Discharge and 1 Month Follow-up") +
+  xlab("Change in MUAC (cm)") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed") + facet_grid(~age_cat)
+
+#stats
+regression_model_richmuac1_older <- lm(richness ~ muac1, data = metadata_wide_species_older)
+summary(regression_model_richmuac1_older)
+regression_model_richmuac1_younger <- lm(richness ~ muac1, data = metadata_wide_species_younger)
+summary(regression_model_richmuac1_younger)
+
+#C species richness by WAZ at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = waz1, y = richness)) +
+  ggtitle("Differences in Species Richness Based\non WAZ at 1 Month Follow-up") +
+  xlab("WAZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richwaz1 <- lm(richness ~ waz1, data = metadata_wide_species)
+summary(regression_model_richwaz1)
+
+#D species richness by HAZ at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = haz1, y = richness)) +
+  ggtitle("Differences in Species Richness Based\non HAZ at 1 Month Follow-up") +
+  xlab("HAZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richhaz1 <- lm(richness ~ haz1, data = metadata_wide_species)
+summary(regression_model_richhaz1)
+
+#E shannon diversty by WHZ at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = whz1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based\non WHZ at 1 Month Follow-up") +
+  xlab("WHZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_shanwhz1 <- lm(shannon ~ whz1, data = metadata_wide_species)
+summary(regression_model_shanwhz1)
+
+#F shannon diversity by MUAC at 1 month follow up (older vs younger than 1 year of age)
+ggplot(metadata_wide_species, aes(x = muacchange0to1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based on Change \nin MUAC between Discharge and 1 Month Follow-up") +
+  xlab("Change in MUAC (cm)") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed") + facet_grid(~age_cat)
+#stats
+regression_model_shanmuac1_older <- lm(shannon ~ muac1, data = metadata_wide_species_older)
+summary(regression_model_shanmuac1_older)
+regression_model_shanmuac1_younger <- lm(shannon ~ muac1, data = metadata_wide_species_younger)
+summary(regression_model_shanmuac1_younger)
+
+#G shannon diversity by WAZ at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = waz1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based\non WAZ at 1 Month Follow-up") +
+  xlab("WAZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_shanwaz1 <- lm(shannon ~ waz1, data = metadata_wide_species)
+summary(regression_model_shanwaz1)
+
+#H shannon diversity based on HAZ at 1 month follow up 
+ggplot(metadata_wide_species, aes(x = haz1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based\non HAZ at 1 Month Follow-up") +
+  xlab("HAZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 9)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_shanhaz1 <- lm(shannon ~ haz1, data = metadata_wide_species)
+summary(regression_model_shanhaz1)
+```
+#S4 
+```{r}
+#A species richness by change in whz between discharge and 1 month follow up 
+ggplot(metadata_wide_species, aes(x = whzchange0to1, y = richness)) +
+  ggtitle("Differences in Species Richness Based on Change \nin WHZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in WHZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richwhzchange0to1 <- lm(richness ~ whzchange0to1, data = metadata_wide_species)
+summary(regression_model_richwhzchange0to1)
+
+#B richness based on change in muac between discharge and 1 month follow up (younger and older than 1 yo)
+ggplot(metadata_wide_species, aes(x = muacchange0to1, y = richness)) +
+  ggtitle("Differences in Species Richness Based on Change \nin MUAC between Discharge and 1 Month Follow-up") +
+  xlab("Change in MUAC (cm)") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed") + facet_grid(~age_cat)
+#stats 
+regression_model_richmuacchange0to1_older <- lm(richness ~ muacchange0to1, data = metadata_wide_species_older)
+summary(regression_model_richmuacchange0to1_older)
+#Adjusted R-squared:  0.001585, p-value: 0.2833
+regression_model_richmuacchange0to1_younger <- lm(richness ~ muacchange0to1, data = metadata_wide_species_younger)
+summary(regression_model_richmuacchange0to1_younger)
+#Adjusted R-squared:  -0.01414, p-value: 0.56
+
+#C richness by change in WAZ bewteen discharge and 1 month follow up 
+ggplot(metadata_wide_species, aes(x = wazchange0to1, y = richness)) +
+  ggtitle("Differences in Species Richness Based on Change \nin WAZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in WAZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richwazchange0to1 <- lm(richness ~ wazchange0to1, data = metadata_wide_species)
+summary(regression_model_richwazchange0to1)
+
+#D richness by change in HAZ between discharge and 1 month follow up 
+ggplot(metadata_wide_species, aes(x = hazchange0to1, y = richness)) +
+  ggtitle("Differences in Species Richness Based on Change \nin HAZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in HAZ") +
+  ylab("Richness") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_richhazchange0to1 <- lm(richness ~ hazchange0to1, data = metadata_wide_species)
+summary(regression_model_richhazchange0to1)
+
+#E shannon diversity by change in whz between discharge and 1 month follow up 
+ggplot(metadata_wide_species, aes(x = whzchange0to1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based on Change \nin WHZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in WHZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_shanwhzchange0to1 <- lm(shannon ~ whzchange0to1, data = metadata_wide_species)
+summary(regression_model_shanwhzchange0to1)
+
+#F shannon diversity by change in muac between discharge and 1 month follow up (older or younger than 1 yo)
+ggplot(metadata_wide_species, aes(x = muacchange0to1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based on Change \nin MUAC between Discharge and 1 Month Follow-up") +
+  xlab("Change in MUAC (cm)") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed") + facet_grid(~age_cat)
+#stats 
+regression_model_shanmuacchange0to1_older <- lm(shannon ~ muacchange0to1, data = metadata_wide_species_older)
+summary(regression_model_shanmuacchange0to1_older)
+#Adjusted R-squared:  -0.009528, p-value: 0.8678
+regression_model_shanmuacchange0to1_younger <- lm(shannon ~ muacchange0to1, data = metadata_wide_species_younger)
+summary(regression_model_shanmuacchange0to1_younger)
+#Adjusted R-squared:  0.0657, p-value: 0.04362
+
+#G shannon diversity by change in WAZ between discharge and 1 month follow up 
+ggplot(metadata_wide_species, aes(x = wazchange0to1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based on Change \nin WAZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in WAZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_shanwazchange0to1 <- lm(shannon ~ wazchange0to1, data = metadata_wide_species)
+summary(regression_model_shanwazchange0to1)
+
+#H shannon diversity by species 
+ggplot(metadata_wide_species, aes(x = hazchange0to1, y = shannon)) +
+  ggtitle("Differences in Shannon Diversity Based on Change \nin HAZ between Discharge and 1 Month Follow-up") +
+  xlab("Change in HAZ") +
+  ylab("Shannon Diversity") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_shanhazchange0to1 <- lm(shannon ~ hazchange0to1, data = metadata_wide_species)
+summary(regression_model_shanhazchange0to1)
+```
+#S5
+```{r}
+#A phyla average abundances by nutritional status at discharge 
+ggplot(metadata_long_phyla_0mo_phyla_ave, aes(uniqSample, normalabundance, fill=Phyla)) + 
+  geom_bar(stat = "identity", position="stack") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Differences in Phyla Abundances Based on Nutritional Status at Discharge ") +
+  xlab("Malnutrition Status at Discharge") +
+  ylab("Normalized Abundance") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.text.x = element_text(size=20), axis.title.x=element_text(size=20), axis.title.y = element_text(size=20), axis.text.y = element_text(size=16), axis.title = element_text(size=24),legend.text = element_text(size = 10),legend.title = element_text(size = 12),plot.title = element_text(size=12)) + theme_linedraw() +
+   scale_x_discrete(limits = c("1", "0"), labels = c("recovered", "MAM")) + 
+  scale_fill_viridis(discrete = TRUE)
+
+#B
+BrayDFmeta |>
+  ggplot(aes(x=V1, y=V2, color=fullrecovery0)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = fullrecovery0), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of Species Level Composition by Nutritional Recovery at Discharge") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("not AM" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat Discharge", ) + 
+  xlab("V1 (0.142837)") +
+  ylab("V2 (0.2541382)") 
+#stats
+fullrecovery0_BrayDFmeta <- BrayDFmeta[!is.na(BrayDFmeta$fullrecovery0),]
+adonis2(Bray~fullrecovery0, data = fullrecovery0_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+```
+#maaslin for S5A stats 
+```{r}
+#using linear mixed effect models to asses significant phyla associated with relapse status at 1 month follow up 
+Maaslin_metadata <- metadata
+row.names(Maaslin_metadata) <- Maaslin_metadata$Sample
+wide_phyla <- read.csv("./wide_phyla.csv")
+row.names(wide_phyla) <- wide_phyla$Sample
+wide_phyla <- wide_phyla[,-1]
+wide_phyla[is.na(wide_phyla)] <- 0
+
+fit_data = Maaslin2(
+    input_data = wide_phyla, 
+    input_metadata = Maaslin_metadata, 
+    output = "phyla_maaslin_discharge", 
+    fixed_effects = c("fullrecovery0","female","age0","muac0","whz0","waz0","haz0"),
+    random_effects = c("month0","clinic"),
+    reference = c('fullrecovery0,0')
+)
+```
+#S6
+```{r}
+#A total ARG abundance by nutritional status at discharge
+ggplot(shortbred_and_metadata_AMR_abundance, aes(x=as.factor(fullrecovery0), y=AMR)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("AMR Abundance by Nutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("AMR Abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=15), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=9.2)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(AMR ~ fullrecovery0, data = shortbred_and_metadata_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_AMR_abundance$AMR, shortbred_and_metadata_AMR_abundance$fullrecovery0, p.adjust.method = "BH")
+
+#B unique ARG hits by nutritional status at discharge 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(fullrecovery0), y=Total)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique AMR hits by Nutritional \nStatus at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Unique AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=12)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(Total ~ fullrecovery0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Total, shortbred_and_metadata_beta_lactam_AMR_binary_hits$fullrecovery0, p.adjust.method = "BH")
+```
+#S7
+```{r}
+#A ARG abundance by Amx exposure 
+ggplot(shortbred_and_metadata_AMR_abundance, aes(x=as.factor(in_amx), y=AMR)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("AMR Abundance by Amoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("AMR Abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=15), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=9.2)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+#stats 
+aggregate(AMR ~ in_amx, data = shortbred_and_metadata_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_AMR_abundance$AMR, shortbred_and_metadata_AMR_abundance$in_amx, p.adjust.method = "BH")
+
+#B unique ARGs by amx exposure 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(in_amx), y=Total)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique AMR hits by Amoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("Unique AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=9.9)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+#stats
+aggregate(Total ~ in_amx, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Total, shortbred_and_metadata_beta_lactam_AMR_binary_hits$in_amx, p.adjust.method = "BH")
+```
+#S8
+```{r}
+#A beta lactam ARG abundance by nutritional status at 1 month follow up 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(relapse1am_whz_and_muac), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta lactam AMR abundance by \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Beta lactam AMR abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=10), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "AM"))
+#stats 
+aggregate(Beta_Lactam ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_abundance$relapse1am_whz_and_muac, p.adjust.method = "BH")
+
+#B Unique beta lactam ARG hits by nutritional status at 1 month follow up 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(relapse1am_whz_and_muac), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique Beta Lactam AMR Hits by \nNutritional Status at 1 Month Follow-up") +
+  xlab("Nutritional Status at 1 Month Follow-up") +
+  ylab("Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=10), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("0", "1"), labels = c("sustained recovery", "AM"))
+#stats
+aggregate(Beta_Lactam ~ relapse1am_whz_and_muac, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_binary_hits$relapse1am_whz_and_muac, p.adjust.method = "BH")
+
+#C beta lactam ARG abundance by nutritional status at discharge 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(fullrecovery0), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta lactam AMR abundance by \nNutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Beta lactam AMR abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(Beta_Lactam ~ fullrecovery0, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_abundance$fullrecovery0, p.adjust.method = "BH")
+
+#D unique beta lactam ARG hits by nutritional status at discharge 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(fullrecovery0), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique Beta Lactam AMR Hits by \nNutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(Beta_Lactam ~ fullrecovery0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_binary_hits$fullrecovery0, p.adjust.method = "BH")
+```
+#S9
+```{r}
+#A beta lactam ARG proportion by nutritional status at discharge 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(fullrecovery0), y=Beta_Lactam_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta Lactam AMR Proportion by \nNutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Beta Lactam AMR Proportion") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(Beta_Lactam_prop ~ fullrecovery0, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam_prop, shortbred_and_metadata_beta_lactam_AMR_abundance$fullrecovery0, p.adjust.method = "BH")
+
+#B propotion of unique beta lactam ARG hits by nutritional status at discharge 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(fullrecovery0), y=hit_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Proportion of Unique Beta Lactam AMR \nHits by Nutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Proportion of Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=9), axis.text.y = element_text(size=12), plot.title = element_text(size=9.2)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats
+aggregate(hit_prop ~ fullrecovery0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$hit_prop, shortbred_and_metadata_beta_lactam_AMR_binary_hits$fullrecovery0, p.adjust.method = "BH")
+```
+#S10
+```{r}
+#A beta lactam ARG abundance by Amoxicillin exposure 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(in_amx), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta lactam AMR abundance by \nAmoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("Beta lactam AMR abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+#stats
+aggregate(Beta_Lactam ~ in_amx, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_abundance$in_amx, p.adjust.method = "BH")
+
+#B unique beta lactam ARG hits by amoxicillin exposure 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(in_amx), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique Beta Lactam AMR Hits by \nAmoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+
+aggregate(Beta_Lactam ~ in_amx, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_binary_hits$in_amx, p.adjust.method = "BH")
+
+#C beta lactam ARG proportion by amoxicillin exposure 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(in_amx), y=Beta_Lactam_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta Lactam AMR Proportion by \nAmoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("Beta Lactam AMR Proportion") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+#stats
+aggregate(Beta_Lactam_prop ~ in_amx, data = shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam_prop, shortbred_and_metadata_beta_lactam_AMR_abundance$in_amx, p.adjust.method = "BH")
+
+#D proportion of unique beta lactam ARG hits by amoxicillin exposure 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(in_amx), y=hit_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Proportion of Unique Beta Lactam AMR \nHits by Amoxicillin Exposure") +
+  xlab("Amoxicillin Exposure") +
+  ylab("Proportion of Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=9), axis.text.y = element_text(size=12), plot.title = element_text(size=9.2)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("Yes", "No"))
+#stats
+aggregate(hit_prop ~ in_amx, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$hit_prop, shortbred_and_metadata_beta_lactam_AMR_binary_hits$in_amx, p.adjust.method = "BH")
+```
+#S11
+```{r}
+#PCoA of ARG gene profiles by nutritional status at discharge 
+shortbred_BrayDFmeta |>
+  ggplot(aes(x=V1, y=V2, color=fullrecovery0)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = fullrecovery0), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of AMR Gene Profiles by Nutritional Status at Discharge") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("not AM" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat Discharge", ) + 
+  xlab("V1 (0.2534066)") +
+  ylab("V2 (0.4266711)") 
+
+#stats
+fullrecovery0_shortbred_BrayDFmeta <- shortbred_BrayDFmeta[!is.na(shortbred_BrayDFmeta$fullrecovery0),]
+
+adonis2(shortbred_Bray~fullrecovery0, data = shortbred_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+```
+#S12
+```{r}
+#A ARG abundance by sex 
+ggplot(shortbred_and_metadata_AMR_abundance, aes(x=as.factor(female), y=AMR)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("AMR Abundance by Sex") +
+  xlab("Sex") +
+  ylab("AMR Abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=12), axis.title.y = element_text(size=16), axis.text.y = element_text(size=12), plot.title = element_text(size=14)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats
+aggregate(AMR ~ female, data = shortbred_and_metadata_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_AMR_abundance$AMR, shortbred_and_metadata_AMR_abundance$female, p.adjust.method = "BH")
+
+#B unique ARG hits by sex 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(female), y=Total)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique AMR hits by Sex") +
+  xlab("Sex") +
+  ylab("Unique AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(Total ~ female, shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Total, shortbred_and_metadata_beta_lactam_AMR_binary_hits$female, p.adjust.method = "BH")
+
+#C Beta lactam ARG abundance by sex 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(female), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta lactam AMR abundance by Sex") +
+  xlab("Sex") +
+  ylab("Beta lactam AMR abundance (RPKM)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(Beta_Lactam ~ female, shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_abundance$female, p.adjust.method = "BH")
+
+#D Unique beta lactam ARG hits by sex 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(female), y=Beta_Lactam)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Unique Beta Lactam AMR Hits by Sex") +
+  xlab("Sex") +
+  ylab("Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(Beta_Lactam ~ female, shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$Beta_Lactam, shortbred_and_metadata_beta_lactam_AMR_binary_hits$female, p.adjust.method = "BH")
+
+#E beta lactam proportion by sex 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x=as.factor(female), y=Beta_Lactam_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Beta Lactam AMR Proportion by Sex") +
+  xlab("Sex") +
+  ylab("Beta Lactam AMR Proportion") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=10), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(Beta_Lactam_prop ~ female, shortbred_and_metadata_beta_lactam_AMR_abundance, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_abundance$Beta_Lactam_prop, shortbred_and_metadata_beta_lactam_AMR_abundance$female, p.adjust.method = "BH")
+
+#F proportion of unique beta lactam ARG hits by sex 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x=as.factor(female), y=hit_prop)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Proportion of Unique Beta Lactam \nAMR Hits by Sex") +
+  xlab("Sex") +
+  ylab("Proportion of Unique Beta Lactam AMR Hits") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=10), axis.title.y = element_text(size=9), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats
+aggregate(hit_prop ~ female, shortbred_and_metadata_beta_lactam_AMR_binary_hits, FUN = median)
+pairwise.wilcox.test(shortbred_and_metadata_beta_lactam_AMR_binary_hits$hit_prop, shortbred_and_metadata_beta_lactam_AMR_binary_hits$female, p.adjust.method = "BH")
+```
+#S13
+```{r}
+#A ARG abundance by Age 
+ggplot(shortbred_and_metadata_AMR_abundance, aes(x = age0, y = AMR)) +
+  ggtitle("Differences in AMR Abundance by Age") +
+  xlab("Age (months)") +
+  ylab("AMR Abundance (RPKM)") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 12)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_amrtotalage0 <- lm(AMR ~ age0, data = shortbred_and_metadata_AMR_abundance)
+summary(regression_model_amrtotalage0)
+
+#B unique ARG hits by age 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x = age0, y=Total)) +
+  ggtitle("Differences in Unique AMR Hits by Age") +
+  xlab("Age (months)") +
+  ylab("Unique AMR Hits") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 10),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_AMRbinaryage0 <- lm(Total ~ age0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits)
+summary(regression_model_AMRbinaryage0)
+
+#C Beta lactam ARG abundance by age 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x = age0, y=Beta_Lactam)) +
+  ggtitle("Differences in Beta Lactam \nAMR abundance by Age") +
+  xlab("Age (months)") +
+  ylab("Beta Lactam AMR Abundance (RPKM)") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 10),
+    plot.title = element_text(size = 12)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_BLtotalage0 <- lm(Beta_Lactam ~ age0, data = shortbred_and_metadata_beta_lactam_AMR_abundance)
+summary(regression_model_BLtotalage0)
+
+#D unique beta lactam ARG hits by age 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x = age0, y=Beta_Lactam)) +
+  ggtitle("Differences in Unique Beta Lactam \nAMR Hits by Age") +
+  xlab("Age (months)") +
+  ylab("Unique Beta Lactam AMR Hits") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 10),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_BLbinaryage0 <- lm(Beta_Lactam ~ age0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits)
+summary(regression_model_BLbinaryage0)
+
+#E Beta lactam ARG proportion by age 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_abundance, aes(x = age0, y=Beta_Lactam_prop)) +
+  ggtitle("Differences in Beta Lactam \nAMR Proportion by Age") +
+  xlab("Age (months)") +
+  ylab("Beta Lactam AMR Proportion") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 10),
+    plot.title = element_text(size = 12)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_BLtotalpropage0 <- lm(Beta_Lactam_prop ~ age0, data = shortbred_and_metadata_beta_lactam_AMR_abundance)
+summary(regression_model_BLtotalpropage0)
+
+#F proportion of unique beta lactam ARG hits by age 
+ggplot(shortbred_and_metadata_beta_lactam_AMR_binary_hits, aes(x = age0, y=hit_prop)) +
+  ggtitle("Differences in Proportion of Unique Beta \nLactam AMR Hits by Age") +
+  xlab("Age (months)") +
+  ylab("Proportion of Unique Beta Lactam AMR Hits") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 9),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats
+regression_model_BLbinarypropage0 <- lm(hit_prop ~ age0, data = shortbred_and_metadata_beta_lactam_AMR_binary_hits)
+summary(regression_model_BLbinarypropage0)
+```
+#S14
+```{r}
+#A number of unique KEGG pathways by nutritional status at discharge 
+ggplot(ko_names_pathways_metadata, aes(x=as.factor(fullrecovery0), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique KEGG Pathways by \nNutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Number of Unique Functional Pathways (KEGG)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(pathways ~ fullrecovery0, data = ko_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(ko_names_pathways_metadata$pathways, ko_names_pathways_metadata$fullrecovery0, p.adjust.method = "BH")
+#B number of unique GO pathawys by nutritional status at discharge 
+ggplot(go_names_pathways_metadata, aes(x=as.factor(fullrecovery0), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique GO Pathways by \nNutritional Status at Discharge") +
+  xlab("Nutritional Status at Discharge") +
+  ylab("Number of Unique Functional Pathways (GO)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=13), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("not AM", "MAM"))
+#stats 
+aggregate(pathways ~ fullrecovery0, data = go_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(go_names_pathways_metadata$pathways, go_names_pathways_metadata$fullrecovery0, p.adjust.method = "BH")
+```
+#S15 
+```{r}
+#A number of unique KEGG pathways by sex 
+ggplot(ko_names_pathways_metadata, aes(x=as.factor(female), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique KEGG Pathways \nby Sex") +
+  xlab("Sex") +
+  ylab("Number of Unique Functional Pathways (KEGG)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=12), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(pathways ~ female, data = ko_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(ko_names_pathways_metadata$pathways, go_names_pathways_metadata$female, p.adjust.method = "BH")
+
+#B number of unique GO pathways by sex 
+ggplot(go_names_pathways_metadata, aes(x=as.factor(female), y=pathways)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  ggtitle("Number of Unique GO Pathways \nby Sex") +
+  xlab("Sex") +
+  ylab("Number of Unique Functional Pathways (GO)") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_linedraw() +
+  theme(axis.text.x = element_text(size=12), axis.title.x=element_text(size=12), axis.title.y = element_text(size=8.3), axis.text.y = element_text(size=12), plot.title = element_text(size=10)) +
+  scale_x_discrete(limits = c("1", "0"), labels = c("female", "male"))
+#stats 
+aggregate(pathways ~ female, data = go_names_pathways_metadata, FUN = median)
+pairwise.wilcox.test(go_names_pathways_metadata$pathways, go_names_pathways_metadata$female, p.adjust.method = "BH")
+
+#number of unique KEGG pathways by age 
+ggplot(ko_names_pathways_metadata, aes(x = age0, y=pathways)) +
+  ggtitle("Differences in Number of Unique KEGG \nPathways by Age") +
+  xlab("Age (months)") +
+  ylab("Number of Unique Functional Pathways (KEGG)") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 8),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_koage0 <- lm(pathways ~ age0, data = ko_names_pathways_metadata)
+summary(regression_model_koage0)
+
+#D number of unique GO pathways by age 
+ggplot(go_names_pathways_metadata, aes(x = age0, y=pathways)) +
+  ggtitle("Differences in Number of Unique GO \nPathways by Age") +
+  xlab("Age (months)") +
+  ylab("Number of Unique Functional Pathways (GO)") +
+  theme_minimal() +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 8),
+    plot.title = element_text(size = 10)
+  ) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "loess", se = TRUE, color = "red", linetype = "dashed")
+#stats 
+regression_model_goage0 <- lm(pathways ~ age0, data = go_names_pathways_metadata)
+summary(regression_model_goage0)
+```
+#S16 
+```{r}
+#A PCoA of KEGG pathways by nutritional status at discharge 
+ko_BrayDFmeta |>
+  ggplot(aes(x=V1, y=V2, color=fullrecovery0)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = fullrecovery0), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of KEGG Pathways by Nutritional Status at Discharge") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("not AM" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat Discharge", ) + 
+  xlab("V1 (0.7256063)") +
+  ylab("V2 (0.8604962)") 
+#stats 
+fullrecovery0_ko_BrayDFmeta <- ko_BrayDFmeta[!is.na(ko_BrayDFmeta$fullrecovery0),]
+adonis2(koBray~fullrecovery0, data = fullrecovery0_ko_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+
+#B PCoA of GO pathways by nutritional status at discharge 
+go_BrayDFmeta |>
+  ggplot(aes(x=V1, y=V2, color=fullrecovery0)) +
+  geom_point(size=2, alpha=0.5) +
+  stat_ellipse(type = "norm", level = 0.95, aes(group = fullrecovery0), size = 0.5) + # Thinner ellipse lines
+  ggtitle("PCoA of KEGG Pathways by Nutritional Status at Discharge") +
+  theme_bw() +
+  theme(
+    legend.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 14, face = "bold"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 12, face = "bold")
+  ) +
+  scale_color_manual(values = c("not AM" = "darkblue", "MAM" = "green")) + labs(color = "Nutritional Status \nat Discharge", ) + 
+  xlab("V1 (0.7256063)") +
+  ylab("V2 (0.8604962)") 
+#stats 
+fullrecovery0_go_BrayDFmeta <- go_BrayDFmeta[!is.na(go_BrayDFmeta$fullrecovery0),]
+adonis2(goBray~fullrecovery0, data = fullrecovery0_go_BrayDFmeta, permutations = 999, method ="bray", na.rm=TRUE)
+```
+
+
